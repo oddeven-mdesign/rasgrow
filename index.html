@@ -174,10 +174,14 @@
                     <!-- 누적 포인트 글박스 (가로폭 확장, 테마 대표색 text-indigo-600 적용) -->
                     <div class="shrink-0 bg-white rounded-2xl px-8 py-4 text-center border border-indigo-100 min-w-[190px] sm:min-w-[210px] shadow-lg flex flex-col justify-center items-center">
                         <span class="text-[11px] font-bold text-slate-500 uppercase tracking-wider">누적 포인트</span>
-                        <div class="mt-1 flex items-baseline justify-center gap-1 text-indigo-600 leading-none">
-                            <span class="text-4xl md:text-5xl font-black tracking-tight" id="bannerTotalPointsVal">0</span>
-                            <span class="text-lg md:text-xl font-bold text-indigo-500">P</span>
+                        <!-- 포인트값 영역의 높이를 고정(h-12 md:h-14)하여 로그인 전후 글상자 크기가 흔들림 없이 유지되도록 설정 -->
+                        <div id="bannerPointValueContainer" class="mt-1 flex items-baseline justify-center gap-1 text-indigo-600 leading-none h-12 md:h-14">
+                            <span class="text-4xl md:text-5xl font-black tracking-tight" id="bannerTotalPointsVal"></span>
+                            <span class="text-lg md:text-xl font-bold text-indigo-500 hidden" id="bannerPointUnit">P</span>
                         </div>
+                        <span id="bannerLoginNotice" class="text-[11px] text-slate-400 font-semibold mt-1 flex items-center justify-center gap-1">
+                            <span>🔒 로그인 필요</span>
+                        </span>
                     </div>
                 </div>
 
@@ -252,9 +256,9 @@
 
                             <!-- 2개의 버튼을 균등 크기 및 순서에 맞춰 배치 -->
                             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
-                                <button type="button" onclick="checkMyRecords()" class="w-full bg-slate-100 hover:bg-slate-200 active:scale-[0.99] text-indigo-900 border border-slate-300/80 font-bold py-3.5 px-4 rounded-xl transition shadow-sm flex items-center justify-center gap-2">
-                                    <svg class="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-                                    <span>성장 기록 확인하기</span>
+                                <button type="button" id="toggleRecordBtn" onclick="toggleMyRecords()" class="w-full bg-slate-100 hover:bg-slate-200 active:scale-[0.99] text-indigo-900 border border-slate-300/80 font-bold py-3.5 px-4 rounded-xl transition shadow-sm flex items-center justify-center gap-2">
+                                    <svg id="toggleRecordIcon" class="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+                                    <span id="toggleRecordBtnText">성장 기록 확인하기</span>
                                 </button>
                                 <button type="submit" id="submitBtn" class="w-full bg-indigo-600 hover:bg-indigo-700 active:scale-[0.99] text-white font-bold py-3.5 px-4 rounded-xl transition shadow-md shadow-indigo-200 flex items-center justify-center gap-2">
                                     <span>🚀</span>
@@ -674,7 +678,40 @@
                     <li>액세스 권한을 <strong>'모든 사용자(Anyone)'</strong>로 설정한 뒤 배포하고 나오는 <strong>웹 앱 URL</strong>을 관리자 설정 창에 입력하세요!</li>
                 </ol>
                 <div class="relative">
-                    <pre class="bg-slate-900 text-slate-100 p-4 rounded-xl font-mono text-[11px] overflow-x-auto select-all" id="appsScriptCodeText">function doPost(e) {
+                    <pre class="bg-slate-900 text-slate-100 p-4 rounded-xl font-mono text-[11px] overflow-x-auto select-all" id="appsScriptCodeText">// 구글 시트 Apps Script 코드 (읽기/쓰기 지원)
+function doGet(e) {
+  try {
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+    var rows = sheet.getDataRange().getValues();
+    if (rows.length &lt;= 1) {
+      return ContentService.createTextOutput(JSON.stringify({ result: "success", data: [] }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+    var headers = rows[0];
+    var data = [];
+    for (var i = 1; i &lt; rows.length; i++) {
+      var row = rows[i];
+      if (!row[0] &amp;&amp; !row[4]) continue; // 빈 행 스킵
+      data.push({
+        dateStr: String(row[0] || ''),
+        grade: String(row[1] || ''),
+        classNum: String(row[2] || ''),
+        studentNum: String(row[3] || ''),
+        studentName: String(row[4] || ''),
+        activities: String(row[5] || '').split(/,\s*/),
+        points: Number(row[6]) || 10,
+        content: String(row[7] || '')
+      });
+    }
+    return ContentService.createTextOutput(JSON.stringify({ result: "success", data: data }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch(err) {
+    return ContentService.createTextOutput(JSON.stringify({ result: "error", error: err.toString() }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function doPost(e) {
   try {
     var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
     if (sheet.getLastRow() === 0) {
@@ -731,6 +768,10 @@
         // 인증 상태 플래그
         let isAdminAuthenticated = false;
         let isStudentAuthenticated = false;
+
+        // 구글 시트 원격 데이터 캐시
+        let remoteSheetLogsCache = [];
+        let isFetchingSheetData = false;
 
         // DOM 요소
         const gradeSelect = document.getElementById('grade');
@@ -951,9 +992,9 @@
                     <td class="p-2.5">${st.studentNum}번</td>
                     <td class="p-2.5 font-bold text-slate-800">${escapeHTML(st.studentName)}</td>
                     <td class="p-2.5 text-center">
-                        <div class="flex items-center justify-center gap-1">
-                            <button type="button" onclick="openEditStudentModal('${st.id}')" class="px-2 py-0.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded text-[11px] transition">수정</button>
-                            <button type="button" onclick="confirmDeleteStudent('${st.id}', '${escapeHTML(st.studentName)}')" class="px-2 py-0.5 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold rounded text-[11px] transition">삭제</button>
+                        <div class="flex items-center justify-center gap-1.5">
+                            <button type="button" onclick="openEditStudentModal('${st.id}')" class="px-3 py-1 min-w-[48px] bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-lg text-xs transition">수정</button>
+                            <button type="button" onclick="confirmDeleteStudent('${st.id}', '${escapeHTML(st.studentName)}')" class="px-3 py-1 min-w-[48px] bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold rounded-lg text-xs transition">삭제</button>
                         </div>
                     </td>
                 `;
@@ -966,9 +1007,8 @@
             // 인적사항 변경 시 작성 중인 모든 입력값 초기화 및 로그인 해제
             resetStudentFormInputs();
 
-            // 나의 성장 기록 섹션도 즉시 숨김
-            const myRecordContainer = document.getElementById('myRecordContainer');
-            if (myRecordContainer) myRecordContainer.classList.add('hidden');
+            // 나의 성장 기록 섹션도 즉시 숨김 및 토글 버튼 리셋
+            hideMyRecordSection();
 
             isStudentAuthenticated = false;
             const authSec = document.getElementById('authenticatedSection');
@@ -990,6 +1030,389 @@
             updateBannerAccumulatedPoints();
         }
 
+        // 누적 포인트 배너 업데이트 (로그인 전에는 빈칸과 안내 표시 유지)
+        function updateBannerAccumulatedPoints() {
+            const pointsValEl = document.getElementById('bannerTotalPointsVal');
+            const pointUnitEl = document.getElementById('bannerPointUnit');
+            const noticeEl = document.getElementById('bannerLoginNotice');
+
+            if (!pointsValEl) return;
+
+            if (!isStudentAuthenticated) {
+                pointsValEl.textContent = '';
+                if (pointUnitEl) pointUnitEl.classList.add('hidden');
+                if (noticeEl) {
+                    noticeEl.className = "text-[11px] text-slate-400 font-semibold mt-1 flex items-center justify-center gap-1";
+                    noticeEl.innerHTML = `<span>🔒 로그인 필요</span>`;
+                }
+                return;
+            }
+
+            const grade = gradeSelect.value;
+            const classNum = classNumSelect.value;
+            const studentNum = document.getElementById('studentNum').value;
+            const studentName = document.getElementById('studentName').value.trim();
+
+            const myLogs = getCombinedStudentLogs(grade, classNum, studentNum, studentName);
+            const totalPoints = myLogs.reduce((sum, item) => sum + (item.points || 10), 0);
+
+            pointsValEl.textContent = totalPoints.toLocaleString();
+            if (pointUnitEl) pointUnitEl.classList.remove('hidden');
+            if (noticeEl) {
+                noticeEl.className = "text-[11px] text-emerald-600 font-bold mt-1 flex items-center justify-center gap-1";
+                noticeEl.innerHTML = `<span>✓ 인증 확인됨</span>`;
+            }
+        }
+
+        // 학생 로그인(인적사항 일치 확인) 처리
+        async function handleStudentLogin() {
+            const grade = gradeSelect.value;
+            const classNum = classNumSelect.value;
+            const studentNum = document.getElementById('studentNum').value;
+            const studentName = document.getElementById('studentName').value.trim();
+
+            if (!grade || !classNum || !studentNum || !studentName) {
+                showToast('학년, 반, 번호, 이름을 모두 올바르게 입력해주세요.', 'error');
+                return;
+            }
+
+            const roster = getStudentRoster();
+            if (roster.length === 0) {
+                showToast('등록된 전교생 명단이 없습니다. 관리자에게 학생 명렬 등록을 요청하세요.', 'error');
+                return;
+            }
+
+            const matched = roster.some(s => 
+                String(s.grade) === String(grade) &&
+                String(s.classNum) === String(classNum) &&
+                String(s.studentNum) === String(studentNum) &&
+                String(s.studentName).trim() === studentName
+            );
+
+            if (!matched) {
+                showToast('등록된 학생 정보와 일치하지 않습니다. 학년, 반, 번호, 이름을 다시 확인해주세요.', 'error');
+                return;
+            }
+
+            isStudentAuthenticated = true;
+            const authSec = document.getElementById('authenticatedSection');
+            if (authSec) authSec.classList.remove('hidden');
+
+            const loginBtn = document.getElementById('studentLoginBtn');
+            const loginBtnText = document.getElementById('studentLoginBtnText');
+            if (loginBtn) {
+                loginBtn.className = "w-full bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-bold py-2.5 px-3 rounded-xl text-xs md:text-sm transition shadow-sm flex items-center justify-center gap-1.5 h-[42px]";
+                loginBtnText.textContent = "인증완료";
+            }
+
+            const notice = document.getElementById('loginStatusNotice');
+            if (notice) {
+                notice.className = "mt-2 text-xs flex items-center gap-1.5 text-emerald-600 font-medium";
+                notice.innerHTML = `<span>✓ <strong>${escapeHTML(studentName)}</strong> 학생 확인 완료. 오늘의 성장 일지를 작성해보세요!</span>`;
+            }
+
+            // 구글 시트 데이터 실시간 동기화 후 누적 포인트 표기
+            const sheetUrl = localStorage.getItem(GOOGLE_SHEET_URL_KEY);
+            if (sheetUrl) {
+                await fetchGoogleSheetLogs();
+            }
+
+            updateBannerAccumulatedPoints();
+            showToast(`${studentName} 학생 인증되었습니다.`, 'success');
+        }
+
+        // 날짜 문자열 포맷팅 (YYYY-MM-DD)
+        function getTodayDateString(timestamp) {
+            const d = timestamp ? new Date(timestamp) : new Date();
+            const year = d.getFullYear();
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+
+        // 1일 제출 제한 횟수 가져오기
+        function getDailyLimit() {
+            try {
+                const limit = parseInt(localStorage.getItem(DAILY_LIMIT_KEY), 10);
+                return isNaN(limit) || limit < 1 ? DEFAULT_DAILY_LIMIT : limit;
+            } catch {
+                return DEFAULT_DAILY_LIMIT;
+            }
+        }
+
+        function saveDailyLimitConfig() {
+            const input = document.getElementById('dailyLimitInput');
+            const val = parseInt(input.value, 10);
+            if (isNaN(val) || val < 1) {
+                showToast('1일 제한 횟수는 1 이상의 숫자여야 합니다.', 'error');
+                return;
+            }
+            localStorage.setItem(DAILY_LIMIT_KEY, val);
+            showToast(`1인당 1일 등록 제한이 ${val}회로 저장되었습니다.`, 'success');
+        }
+
+        function renderDailyLimitInput() {
+            const input = document.getElementById('dailyLimitInput');
+            if (input) input.value = getDailyLimit();
+        }
+
+        // 학년별 학급 설정 가져오기 및 저장
+        function getClassConfig() {
+            try {
+                return JSON.parse(localStorage.getItem(CLASS_CONFIG_KEY)) || defaultClassConfig;
+            } catch {
+                return defaultClassConfig;
+            }
+        }
+
+        function saveClassConfig() {
+            const g1 = parseInt(document.getElementById('classConfigGrade1').value, 10) || defaultClassConfig["1"];
+            const g2 = parseInt(document.getElementById('classConfigGrade2').value, 10) || defaultClassConfig["2"];
+            const g3 = parseInt(document.getElementById('classConfigGrade3').value, 10) || defaultClassConfig["3"];
+
+            const newConfig = { "1": g1, "2": g2, "3": g3 };
+            localStorage.setItem(CLASS_CONFIG_KEY, JSON.stringify(newConfig));
+            updateClassOptions();
+            showToast('학년별 학급 수가 저장되었습니다!', 'success');
+        }
+
+        function renderClassConfigInputs() {
+            const config = getClassConfig();
+            if (document.getElementById('classConfigGrade1')) document.getElementById('classConfigGrade1').value = config["1"] || 7;
+            if (document.getElementById('classConfigGrade2')) document.getElementById('classConfigGrade2').value = config["2"] || 8;
+            if (document.getElementById('classConfigGrade3')) document.getElementById('classConfigGrade3').value = config["3"] || 7;
+        }
+
+        function updateClassOptions() {
+            const grade = gradeSelect.value;
+            const config = getClassConfig();
+            const currentSelected = classNumSelect.value;
+
+            classNumSelect.innerHTML = '<option value="">반 선택</option>';
+
+            if (grade && config[grade]) {
+                const maxClass = config[grade];
+                for (let i = 1; i <= maxClass; i++) {
+                    const opt = document.createElement('option');
+                    opt.value = i;
+                    opt.textContent = `${i}반`;
+                    if (String(currentSelected) === String(i)) opt.selected = true;
+                    classNumSelect.appendChild(opt);
+                }
+            } else {
+                classNumSelect.innerHTML = '<option value="">학년 먼저 선택</option>';
+            }
+        }
+
+        gradeSelect.addEventListener('change', updateClassOptions);
+
+        // 활동 항목 가져오기 및 렌더링
+        function getActivities() {
+            try {
+                const saved = JSON.parse(localStorage.getItem(ACTIVITIES_KEY));
+                if (Array.isArray(saved) && saved.length > 0) return saved;
+            } catch {}
+            return defaultActivities;
+        }
+
+        function saveActivities(list) {
+            localStorage.setItem(ACTIVITIES_KEY, JSON.stringify(list));
+            renderActivityCheckboxes();
+            renderActivityManageBadges();
+            updateActivityFilterOptions();
+        }
+
+        function renderActivityCheckboxes() {
+            const container = document.getElementById('activityCheckboxContainer');
+            if (!container) return;
+
+            const activities = getActivities();
+            container.innerHTML = '';
+
+            // 동적 그리드 클래스 산출
+            let gridColClass = 'grid-cols-2 md:grid-cols-3';
+            if (activities.length === 2) gridColClass = 'grid-cols-2';
+            else if (activities.length === 4) gridColClass = 'grid-cols-2 md:grid-cols-4';
+            else if (activities.length >= 5) gridColClass = 'grid-cols-2 md:grid-cols-3';
+
+            container.className = `grid ${gridColClass} gap-3`;
+
+            activities.forEach((act, idx) => {
+                const label = document.createElement('label');
+                label.className = `activity-card relative flex items-center justify-between p-3.5 rounded-xl border border-slate-200/90 bg-white cursor-pointer select-none transition-all duration-200 hover:border-indigo-400 hover:shadow-sm`;
+
+                label.innerHTML = `
+                    <input type="checkbox" name="activities" value="${escapeHTML(act)}" onchange="onActivityCheckboxChange(this)" class="sr-only">
+                    <span class="activity-label text-base md:text-lg font-bold text-slate-800 flex items-center gap-2 leading-none">
+                        <span class="inline-flex items-center justify-center">${act}</span>
+                    </span>
+                    <span class="point-badge text-xs px-2.5 py-1 rounded-full font-bold bg-indigo-50 text-indigo-600 transition-colors">+10P</span>
+                `;
+                container.appendChild(label);
+            });
+
+            calculatePoints();
+        }
+
+        function onActivityCheckboxChange(checkbox) {
+            const card = checkbox.closest('.activity-card');
+            const label = card.querySelector('.activity-label');
+            const badge = card.querySelector('.point-badge');
+
+            if (checkbox.checked) {
+                card.classList.remove('bg-white', 'border-slate-200/90');
+                card.classList.add('bg-indigo-600', 'border-indigo-600', 'text-white', 'shadow-md');
+                label.classList.remove('text-slate-800');
+                label.classList.add('text-white');
+                badge.classList.remove('bg-indigo-50', 'text-indigo-600');
+                badge.classList.add('bg-white/20', 'text-white');
+            } else {
+                card.classList.remove('bg-indigo-600', 'border-indigo-600', 'text-white', 'shadow-md');
+                card.classList.add('bg-white', 'border-slate-200/90');
+                label.classList.remove('text-white');
+                label.classList.add('text-slate-800');
+                badge.classList.remove('bg-white/20', 'text-white');
+                badge.classList.add('bg-indigo-50', 'text-indigo-600');
+            }
+
+            calculatePoints();
+        }
+
+        function addCustomActivity() {
+            const input = document.getElementById('newActivityInput');
+            const name = input.value.trim();
+            if (!name) {
+                showToast('추가할 활동 항목 이름을 입력해주세요.', 'error');
+                return;
+            }
+
+            const current = getActivities();
+            if (current.includes(name)) {
+                showToast('이미 등록되어 있는 활동입니다.', 'error');
+                return;
+            }
+
+            current.push(name);
+            saveActivities(current);
+            input.value = '';
+            showToast(`'${name}' 활동 항목이 추가되었습니다.`, 'success');
+        }
+
+        function deleteCustomActivity(name) {
+            const current = getActivities();
+            if (current.length <= 1) {
+                showToast('최소 한 개의 활동 항목은 유지되어야 합니다.', 'error');
+                return;
+            }
+
+            showConfirmModal('활동 항목 삭제', `'${name}' 활동을 삭제하시겠습니까?`, () => {
+                const updated = current.filter(item => item !== name);
+                saveActivities(updated);
+                showToast(`'${name}' 활동이 삭제되었습니다.`, 'info');
+            });
+        }
+
+        function renderActivityManageBadges() {
+            const container = document.getElementById('activityManageBadges');
+            if (!container) return;
+
+            const activities = getActivities();
+            container.innerHTML = '';
+
+            activities.forEach(act => {
+                const badge = document.createElement('div');
+                badge.className = "flex items-center gap-1.5 bg-indigo-50 border border-indigo-200 text-indigo-700 px-3 py-1.5 rounded-xl text-xs font-bold";
+                badge.innerHTML = `
+                    <span>${escapeHTML(act)}</span>
+                    <button type="button" onclick="deleteCustomActivity('${escapeHTML(act)}')" class="hover:text-rose-600 ml-1 text-slate-400 font-black">✕</button>
+                `;
+                container.appendChild(badge);
+            });
+        }
+
+        function updateActivityFilterOptions() {
+            const select = document.getElementById('filterActivity');
+            if (!select) return;
+
+            select.innerHTML = '<option value="">전체 활동</option>';
+            getActivities().forEach(act => {
+                const opt = document.createElement('option');
+                opt.value = act;
+                opt.textContent = act;
+                select.appendChild(opt);
+            });
+        }
+
+        // 구글 시트 원격 데이터 비동기 조회 함수
+        async function fetchGoogleSheetLogs() {
+            const sheetUrl = localStorage.getItem(GOOGLE_SHEET_URL_KEY);
+            if (!sheetUrl) return null;
+
+            try {
+                isFetchingSheetData = true;
+                const res = await fetch(sheetUrl);
+                if (!res.ok) throw new Error('구글 시트 응답 오류: ' + res.status);
+                const json = await res.json();
+                if (json && json.result === 'success' && Array.isArray(json.data)) {
+                    remoteSheetLogsCache = json.data.map((item, idx) => ({
+                        id: 'remote_' + idx + '_' + (item.dateStr || ''),
+                        timestamp: item.dateStr ? new Date(item.dateStr).getTime() || Date.now() : Date.now(),
+                        dateStr: item.dateStr || '',
+                        grade: String(item.grade || ''),
+                        classNum: String(item.classNum || ''),
+                        studentNum: String(item.studentNum || ''),
+                        studentName: String(item.studentName || '').trim(),
+                        activities: Array.isArray(item.activities) ? item.activities : [String(item.activities || '')],
+                        points: Number(item.points) || 10,
+                        content: item.content || '',
+                        syncedToSheet: true
+                    }));
+                    return remoteSheetLogsCache;
+                }
+            } catch (err) {
+                console.warn('구글 시트 실시간 데이터 조회 실패 (로컬 데이터로 대체):', err);
+            } finally {
+                isFetchingSheetData = false;
+            }
+            return null;
+        }
+
+        // 로컬 및 구글 시트 데이터를 통합하여 해당 학생의 기록 필터링
+        function getCombinedStudentLogs(grade, classNum, studentNum, studentName) {
+            const targetGrade = String(grade);
+            const targetClass = String(classNum);
+            const targetNum = String(studentNum);
+            const targetName = String(studentName).trim();
+
+            const isMatch = (item) => (
+                String(item.grade) === targetGrade &&
+                String(item.classNum) === targetClass &&
+                String(item.studentNum) === targetNum &&
+                String(item.studentName).trim() === targetName
+            );
+
+            // 원격 시트 캐시가 있으면 원격 데이터를 우선 기준으로 사용하되, 로컬에서 아직 동기화 전인 항목 병합
+            if (remoteSheetLogsCache && remoteSheetLogsCache.length > 0) {
+                const remoteMatches = remoteSheetLogsCache.filter(isMatch);
+                const localLogs = getLogs().filter(isMatch);
+
+                // 원격에 아직 반영되지 않은 최신 로컬 항목 병합
+                const merged = [...remoteMatches];
+                localLogs.forEach(loc => {
+                    const alreadyExists = merged.some(rem => 
+                        rem.dateStr === loc.dateStr && rem.content === loc.content
+                    );
+                    if (!alreadyExists) {
+                        merged.unshift(loc);
+                    }
+                });
+                return merged;
+            }
+
+            // 시트 데이터가 없으면 로컬 데이터 반환
+            return getLogs().filter(isMatch);
+        }
+
         function resetStudentFormInputs() {
             // 활동 체크박스 초기화
             document.querySelectorAll('input[name="activities"]:checked').forEach(cb => {
@@ -1005,356 +1428,66 @@
             if (badge) badge.textContent = '선택 포인트: 0P';
         }
 
-        // 학생 로그인 검증 핸들러 (명단이 비어있으면 차단)
-        function handleStudentLogin() {
-            const grade = gradeSelect.value;
-            const classNum = classNumSelect.value;
-            const studentNum = document.getElementById('studentNum').value;
-            const studentName = document.getElementById('studentName').value.trim();
-
-            if (!grade || !classNum || !studentNum || !studentName) {
-                showToast('학년, 반, 번호, 이름을 먼저 모두 입력해주세요.', 'error');
-                return;
-            }
-
-            const roster = getStudentRoster();
-
-            // 등록된 명단이 아예 없을 때 무조건 거부
-            if (roster.length === 0) {
-                showToast('등록된 학생 명단이 없습니다. 관리자에게 학생 명렬 등록을 요청하세요.', 'error');
-                return;
-            }
-
-            // 등록된 학생 명단과 엄격히 일치 검증
-            const matched = roster.find(s => 
-                String(s.grade) === String(grade) &&
-                String(s.classNum) === String(classNum) &&
-                String(s.studentNum) === String(studentNum) &&
-                s.studentName.trim() === studentName
-            );
-
-            if (!matched) {
-                showToast('등록된 학생 정보와 일치하지 않습니다. 학년, 반, 번호, 이름을 다시 확인해주세요.', 'error');
-                return;
-            }
-
-            // 로그인 성공 처리
-            isStudentAuthenticated = true;
-            const authSec = document.getElementById('authenticatedSection');
-            authSec.classList.remove('hidden');
-
-            const loginBtn = document.getElementById('studentLoginBtn');
-            const loginBtnText = document.getElementById('studentLoginBtnText');
-            loginBtn.className = "w-full bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-bold py-2.5 px-3 rounded-xl text-xs md:text-sm transition shadow-sm flex items-center justify-center gap-1.5 h-[42px]";
-            loginBtnText.textContent = "인증완료 ✓";
-
-            const notice = document.getElementById('loginStatusNotice');
-            notice.className = "mt-2 text-xs flex items-center gap-1.5 text-emerald-700 font-semibold";
-            notice.innerHTML = `<span>✓ ${escapeHTML(studentName)} 학생 인증 완료! 오늘의 활동을 선택하고 소감을 기록해주세요.</span>`;
-
-            updateBannerAccumulatedPoints();
-            showToast(`${studentName} 학생 환영합니다! 오늘 성장일지를 작성해보세요.`, 'success');
-        }
-
-        // 1일 최대 등록 횟수 불러오기 & 저장
-        function getDailyLimit() {
-            try {
-                const stored = localStorage.getItem(DAILY_LIMIT_KEY);
-                return stored ? Math.max(1, parseInt(stored, 10)) : DEFAULT_DAILY_LIMIT;
-            } catch {
-                return DEFAULT_DAILY_LIMIT;
+        // 기록 섹션 강제 숨김 및 버튼 리셋 헬퍼
+        function hideMyRecordSection() {
+            const container = document.getElementById('myRecordContainer');
+            if (container) container.classList.add('hidden');
+            const btnText = document.getElementById('toggleRecordBtnText');
+            const icon = document.getElementById('toggleRecordIcon');
+            if (btnText) btnText.textContent = '성장 기록 확인하기';
+            if (icon) {
+                icon.innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>`;
             }
         }
 
-        function saveDailyLimitConfig() {
-            const inputVal = parseInt(document.getElementById('dailyLimitInput').value, 10) || DEFAULT_DAILY_LIMIT;
-            const limit = Math.max(1, inputVal);
-            localStorage.setItem(DAILY_LIMIT_KEY, limit.toString());
-            showToast(`1인당 1일 등록 횟수가 ${limit}회로 설정되었습니다.`, 'success');
-        }
-
-        function renderDailyLimitInput() {
-            const input = document.getElementById('dailyLimitInput');
-            if (input) {
-                input.value = getDailyLimit();
-            }
-        }
-
-        // 오늘 날짜 문자열(YYYY-MM-DD) 반환 헬퍼
-        function getTodayDateString(timestamp) {
-            const date = timestamp ? new Date(timestamp) : new Date();
-            const y = date.getFullYear();
-            const m = String(date.getMonth() + 1).padStart(2, '0');
-            const d = String(date.getDate()).padStart(2, '0');
-            return `${y}-${m}-${d}`;
-        }
-
-        // 학년별 학급 수 설정 로드 & 저장
-        function getClassConfig() {
-            try {
-                const stored = localStorage.getItem(CLASS_CONFIG_KEY);
-                return stored ? JSON.parse(stored) : defaultClassConfig;
-            } catch {
-                return defaultClassConfig;
-            }
-        }
-
-        function saveClassConfig() {
-            const g1 = parseInt(document.getElementById('classConfigGrade1').value) || 7;
-            const g2 = parseInt(document.getElementById('classConfigGrade2').value) || 8;
-            const g3 = parseInt(document.getElementById('classConfigGrade3').value) || 7;
-
-            const config = { "1": Math.max(1, g1), "2": Math.max(1, g2), "3": Math.max(1, g3) };
-            localStorage.setItem(CLASS_CONFIG_KEY, JSON.stringify(config));
-            
-            updateClassOptions();
-            showToast('학년별 학급 수가 성공적으로 저장되었습니다!', 'success');
-        }
-
-        function renderClassConfigInputs() {
-            const config = getClassConfig();
-            const inp1 = document.getElementById('classConfigGrade1');
-            const inp2 = document.getElementById('classConfigGrade2');
-            const inp3 = document.getElementById('classConfigGrade3');
-            if (inp1 && inp2 && inp3) {
-                inp1.value = config["1"] || 7;
-                inp2.value = config["2"] || 8;
-                inp3.value = config["3"] || 7;
-            }
-        }
-
-        function updateClassOptions() {
-            const grade = gradeSelect.value;
-            const currentSelected = classNumSelect.value;
-            classNumSelect.innerHTML = '<option value="">반 선택</option>';
-            const config = getClassConfig();
-
-            if (grade && config[grade]) {
-                for (let i = 1; i <= config[grade]; i++) {
-                    const opt = document.createElement('option');
-                    opt.value = i;
-                    opt.textContent = `${i}반`;
-                    if (String(i) === String(currentSelected)) opt.selected = true;
-                    classNumSelect.appendChild(opt);
-                }
-            } else {
-                classNumSelect.innerHTML = '<option value="">학년 먼저 선택</option>';
-            }
-        }
-
-        gradeSelect.addEventListener('change', () => {
-            updateClassOptions();
-            updateBannerAccumulatedPoints();
-        });
-
-        // 활동 목록 불러오기 & 저장
-        function getActivities() {
-            try {
-                const stored = localStorage.getItem(ACTIVITIES_KEY);
-                let list = stored ? JSON.parse(stored) : defaultActivities;
-                list = list.map(item => item.includes('체육') ? '⚽ 체육·스포츠' : item);
-                return list;
-            } catch {
-                return defaultActivities;
-            }
-        }
-
-        function saveActivities(list) {
-            localStorage.setItem(ACTIVITIES_KEY, JSON.stringify(list));
-            renderActivityCheckboxes();
-            renderActivityManageBadges();
-            updateActivityFilterOptions();
-        }
-
-        function splitIconAndText(str) {
-            const trimmed = (str || '').trim();
-            const match = trimmed.match(/^(\p{Extended_Pictographic}+|\S+)\s*(.*)$/u);
-            if (match && match[1] && match[2]) {
-                return { icon: match[1], label: match[2] };
-            }
-            return { icon: '✨', label: trimmed };
-        }
-
-        function renderActivityCheckboxes() {
-            const list = getActivities();
-            const container = document.getElementById('activityCheckboxContainer');
-            container.innerHTML = '';
-
-            const total = list.length;
-            let gridColsClass = 'grid-cols-2 sm:grid-cols-3';
-            if (total === 2) {
-                gridColsClass = 'grid-cols-2';
-            } else if (total === 4) {
-                gridColsClass = 'grid-cols-2 sm:grid-cols-4';
-            } else if (total >= 6) {
-                gridColsClass = 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4';
-            } else {
-                gridColsClass = 'grid-cols-2 sm:grid-cols-3';
-            }
-
-            container.className = `grid ${gridColsClass} gap-3`;
-
-            list.forEach(act => {
-                const parsed = splitIconAndText(act);
-                const label = document.createElement('label');
-                label.className = "activity-card relative flex items-center justify-between p-3.5 md:p-4 rounded-xl cursor-pointer border-2 border-slate-200 bg-white hover:border-indigo-300 hover:bg-slate-50 transition-all duration-200 select-none shadow-sm";
-                label.innerHTML = `
-                    <input type="checkbox" name="activities" value="${escapeHTML(act)}" onchange="onActivityCheckboxChange(this)" class="sr-only">
-                    <div class="flex items-center gap-2.5 min-w-0 pr-1 leading-none">
-                        <span class="card-icon text-2xl md:text-3xl shrink-0 inline-flex items-center justify-center leading-none transition-transform duration-200">${parsed.icon}</span>
-                        <span class="card-title text-base md:text-lg font-bold text-slate-800 tracking-tight truncate leading-normal transition-colors duration-200">${escapeHTML(parsed.label)}</span>
-                    </div>
-                    <span class="card-badge shrink-0 text-xs font-bold px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 transition-colors duration-200 leading-none">+10P</span>
-                `;
-                container.appendChild(label);
-            });
-            calculatePoints();
-        }
-
-        function onActivityCheckboxChange(input) {
-            const card = input.closest('.activity-card');
-            if (!card) return;
-            const icon = card.querySelector('.card-icon');
-            const title = card.querySelector('.card-title');
-            const badge = card.querySelector('.card-badge');
-
-            if (input.checked) {
-                card.classList.remove('border-slate-200', 'bg-white', 'hover:bg-slate-50', 'hover:border-indigo-300');
-                card.classList.add('border-indigo-600', 'bg-indigo-600', 'shadow-md', 'shadow-indigo-200');
-                if (icon) icon.classList.add('scale-110');
-                if (title) {
-                    title.classList.remove('text-slate-800');
-                    title.classList.add('text-white');
-                }
-                if (badge) {
-                    badge.classList.remove('bg-indigo-50', 'text-indigo-700');
-                    badge.classList.add('bg-white/25', 'text-amber-200');
-                }
-            } else {
-                card.classList.add('border-slate-200', 'bg-white', 'hover:bg-slate-50', 'hover:border-indigo-300');
-                card.classList.remove('border-indigo-600', 'bg-indigo-600', 'shadow-md', 'shadow-indigo-200');
-                if (icon) icon.classList.remove('scale-110');
-                if (title) {
-                    title.classList.add('text-slate-800');
-                    title.classList.remove('text-white');
-                }
-                if (badge) {
-                    badge.classList.add('bg-indigo-50', 'text-indigo-700');
-                    badge.classList.remove('bg-white/25', 'text-amber-200');
-                }
-            }
-            calculatePoints();
-        }
-
-        function updateBannerAccumulatedPoints() {
-            const grade = gradeSelect.value;
-            const classNum = classNumSelect.value;
-            const studentNum = document.getElementById('studentNum').value;
-            const studentName = document.getElementById('studentName').value.trim();
-            const valElem = document.getElementById('bannerTotalPointsVal');
-
-            if (!grade || !classNum || !studentNum || !studentName) {
-                valElem.textContent = '0';
-                return;
-            }
-
-            const logs = getLogs();
-            const myLogs = logs.filter(log => 
-                log.grade === grade &&
-                log.classNum === classNum &&
-                String(log.studentNum) === String(studentNum) &&
-                log.studentName === studentName
-            );
-
-            const totalPoints = myLogs.reduce((sum, item) => sum + (item.points || 10), 0);
-            valElem.textContent = totalPoints.toLocaleString();
-        }
-
-        function renderActivityManageBadges() {
-            const list = getActivities();
-            const container = document.getElementById('activityManageBadges');
-            if (!container) return;
-            container.innerHTML = '';
-
-            list.forEach(act => {
-                const badge = document.createElement('div');
-                badge.className = "flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 text-slate-700 text-xs font-semibold border border-slate-200";
-                badge.innerHTML = `
-                    <span>${escapeHTML(act)}</span>
-                    <button type="button" onclick="removeActivity('${escapeHTML(act)}')" class="text-rose-500 hover:text-rose-700 ml-1 font-bold">×</button>
-                `;
-                container.appendChild(badge);
-            });
-        }
-
-        function addCustomActivity() {
-            const input = document.getElementById('newActivityInput');
-            const name = input.value.trim();
-            if (!name) {
-                showToast('추가할 활동명을 입력해주세요.', 'error');
-                return;
-            }
-            const list = getActivities();
-            if (list.includes(name)) {
-                showToast('이미 존재하는 활동 항목입니다.', 'error');
-                return;
-            }
-            list.push(name);
-            saveActivities(list);
-            input.value = '';
-            showToast(`'${name}' 활동 항목이 추가되었습니다.`, 'success');
-        }
-
-        function removeActivity(name) {
-            const list = getActivities();
-            if (list.length <= 1) {
-                showToast('최소 1개 이상의 활동 항목이 유지되어야 합니다.', 'error');
-                return;
-            }
-            const updated = list.filter(item => item !== name);
-            saveActivities(updated);
-            showToast(`'${name}' 활동이 삭제되었습니다.`, 'info');
-        }
-
-        function updateActivityFilterOptions() {
-            const select = document.getElementById('filterActivity');
-            if (!select) return;
-            const currentVal = select.value;
-            select.innerHTML = '<option value="">전체 활동</option>';
-            getActivities().forEach(act => {
-                const opt = document.createElement('option');
-                opt.value = act;
-                opt.textContent = act;
-                select.appendChild(opt);
-            });
-            select.value = currentVal;
-        }
-
-        // 학생 본인 성장 기록 조회 (조회 버튼 클릭 시에만 섹션 표시)
-        function checkMyRecords() {
+        // 학생 본인 성장 기록 토글 (확인하기 <-> 숨기기)
+        async function toggleMyRecords() {
             if (!isStudentAuthenticated) {
                 showToast('먼저 [로그인]을 완료해주세요.', 'error');
                 return;
             }
 
+            const container = document.getElementById('myRecordContainer');
+            const btnText = document.getElementById('toggleRecordBtnText');
+            const icon = document.getElementById('toggleRecordIcon');
+
+            // 이미 열려 있는 경우 -> 숨기기 처리
+            if (!container.classList.contains('hidden')) {
+                hideMyRecordSection();
+                showToast('성장 기록 창을 닫았습니다.', 'info');
+                return;
+            }
+
+            // 닫혀 있는 경우 -> 데이터 불러오기 및 노출
+            await checkMyRecords();
+            container.classList.remove('hidden');
+            if (btnText) btnText.textContent = '성장 기록 숨기기';
+            if (icon) {
+                icon.innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"/>`;
+            }
+        }
+
+        // 학생 본인 성장 기록 데이터 조회 및 렌더링
+        async function checkMyRecords() {
+            if (!isStudentAuthenticated) return;
+
             const grade = gradeSelect.value;
             const classNum = classNumSelect.value;
             const studentNum = document.getElementById('studentNum').value;
             const studentName = document.getElementById('studentName').value.trim();
 
-            const logs = getLogs();
-            const myLogs = logs.filter(log => 
-                log.grade === grade &&
-                log.classNum === classNum &&
-                String(log.studentNum) === String(studentNum) &&
-                log.studentName === studentName
-            ).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-
             const container = document.getElementById('myRecordContainer');
             const listContainer = document.getElementById('myRecordList');
 
-            // 버튼 클릭 시 섹션 노출
-            container.classList.remove('hidden');
+            // 구글 시트 최신 데이터 실시간 동기화 시도
+            const sheetUrl = localStorage.getItem(GOOGLE_SHEET_URL_KEY);
+            if (sheetUrl) {
+                showToast('구글 시트에서 최신 누적 기록을 불러오는 중...', 'info');
+                await fetchGoogleSheetLogs();
+            }
+
+            const myLogs = getCombinedStudentLogs(grade, classNum, studentNum, studentName)
+                .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 
             const totalPoints = myLogs.reduce((sum, item) => sum + (item.points || 10), 0);
             document.getElementById('myStatInfo').textContent = `${grade}학년 ${classNum}반 ${studentNum}번 ${studentName}`;
@@ -1375,15 +1508,21 @@
                     const card = document.createElement('div');
                     card.className = "p-4 bg-slate-50 border border-slate-200/90 rounded-xl text-xs select-none hover:border-indigo-300 transition";
                     
-                    const badges = log.activities.map(a => 
+                    const logActivities = Array.isArray(log.activities) ? log.activities : [String(log.activities || '')];
+                    const badges = logActivities.map(a => 
                         `<span class="inline-block bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-md font-bold text-[10px] mr-1">${escapeHTML(a)}</span>`
                     ).join('');
+
+                    const syncOriginBadge = log.syncedToSheet 
+                        ? `<span class="text-[10px] text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded font-medium">구글 시트</span>`
+                        : `<span class="text-[10px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded font-medium">로컬</span>`;
 
                     card.innerHTML = `
                         <div class="flex justify-between items-center mb-2 pb-2 border-b border-slate-200/60">
                             <div class="flex items-center gap-1.5 flex-wrap">
                                 <span class="bg-slate-200 text-slate-700 font-bold px-1.5 py-0.5 rounded text-[10px]">#${myLogs.length - index}회차</span>
                                 ${badges}
+                                ${syncOriginBadge}
                             </div>
                             <div class="flex items-center gap-2">
                                 <span class="text-[11px] font-bold text-emerald-600">+${log.points || 10}P</span>
@@ -1399,7 +1538,7 @@
             }
 
             container.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            showToast(`${studentName} 학생의 성장 기록 ${myLogs.length}건을 조회했습니다.`, 'success');
+            showToast(`${studentName} 학생의 구글 시트 연동 기록 ${myLogs.length}건을 조회했습니다.`, 'success');
         }
 
         // 관리자 탭 클릭 제어
@@ -1736,6 +1875,8 @@
                         body: JSON.stringify(newLog)
                     });
                     newLog.syncedToSheet = true;
+                    // 원격 캐시에도 즉각 반영
+                    remoteSheetLogsCache.unshift(newLog);
                 } catch (err) {
                     console.error('구글 시트 전송 실패:', err);
                     newLog.syncedToSheet = false;
@@ -1753,7 +1894,12 @@
 
             resetStudentFormInputs();
             updateBannerAccumulatedPoints();
-            checkMyRecords();
+            
+            // 만약 기록창이 이미 열려 있다면 최신 제출본 반영 갱신
+            const recordContainer = document.getElementById('myRecordContainer');
+            if (recordContainer && !recordContainer.classList.contains('hidden')) {
+                checkMyRecords();
+            }
         }
 
         function getLogs() {
@@ -1788,8 +1934,9 @@
                 return;
             }
 
-            showToast('연동 테스트 데이터를 구글 시트로 전송합니다...', 'info');
+            showToast('연동 테스트 데이터를 구글 시트로 전송하고 읽기 테스트를 진행합니다...', 'info');
             try {
+                // 쓰기 테스트
                 await fetch(url, {
                     method: 'POST',
                     mode: 'no-cors',
@@ -1805,9 +1952,18 @@
                         content: '구글 스프레드시트 연동 테스트 완료!'
                     })
                 });
-                showToast('구글 시트로 테스트 신호가 정상 송신되었습니다! 시트를 확인해보세요.', 'success');
+
+                // 읽기(GET) 테스트
+                const readRes = await fetch(url);
+                const readJson = await readRes.json();
+
+                if (readJson && readJson.result === 'success') {
+                    showToast(`구글 시트 양방향 연동 성공! (현재 시트에 저장된 기록: ${readJson.data.length}건)`, 'success');
+                } else {
+                    showToast('데이터는 전송되었으나 doGet(읽기) 응답 형식을 확인해주세요. 연동 코드 안내를 참고하세요.', 'info');
+                }
             } catch (err) {
-                showToast('연동 테스트 중 오류가 발생했습니다: ' + err.message, 'error');
+                showToast('전송 완료되었거나 CORS 정책으로 확인 중입니다: ' + err.message, 'info');
             }
         }
 
@@ -2075,6 +2231,7 @@
             renderClassConfigInputs();
             renderDailyLimitInput();
             renderStudentRosterTable();
+            updateBannerAccumulatedPoints();
 
             const savedSheetUrl = localStorage.getItem(GOOGLE_SHEET_URL_KEY);
             if (savedSheetUrl) {
