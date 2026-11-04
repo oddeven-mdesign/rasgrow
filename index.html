@@ -887,27 +887,46 @@ function doGet(e) {
             } else if (tabName === 'admin') {
                 document.getElementById('tab-admin').classList.remove('hidden');
                 if (navAdmin) navAdmin.className = "px-3.5 py-2 rounded-lg text-xs md:text-sm font-bold transition bg-white text-indigo-700 shadow flex items-center gap-1";
-                switchAdminSubTab('records');
+                // 탭 전환 시 직접 switchAdminSubTab 호출은 동기화 함수와 겹치지 않도록 조정
             }
         }
 
-        function handleAdminTabClick() {
+        async function handleAdminTabClick() {
             if (isAdminLoggedIn) {
                 switchTab('admin');
+                await switchAdminSubTab('records');
             } else {
                 switchTab('admin-auth');
             }
         }
 
-        function handleAdminLogin(e) {
+        async function handleAdminLogin(e) {
             e.preventDefault();
             const input = document.getElementById('adminPasswordInput').value;
             const currentPwd = localStorage.getItem(STORAGE_KEY_ADMIN_PWD) || '1234';
             if (input === currentPwd) {
                 isAdminLoggedIn = true;
                 document.getElementById('adminPasswordInput').value = '';
-                showToast('관리자 인증에 성공하였습니다.', 'success');
+                
+                // 로그인 완료 시 관리자 탭 활성화
                 switchTab('admin');
+                
+                const sheetUrl = localStorage.getItem(GOOGLE_SHEET_URL_KEY);
+                if (sheetUrl) {
+                    showToast('구글 시트의 최신 데이터를 실시간으로 동기화하는 중...', 'info');
+                    // 로컬 데이터를 우선 띄우지 않고, 구글 시트 원본을 최우선으로 fetch 완료 후 렌더링
+                    const data = await fetchGoogleSheetLogs();
+                    if (data) {
+                        showToast(`구글 시트 데이터 ${data.length}건을 성공적으로 불러왔습니다!`, 'success');
+                    } else {
+                        showToast('구글 시트 통신에 실패하여 로컬 데이터를 대체 표시합니다.', 'error');
+                    }
+                } else {
+                    showToast('관리자 인증 완료 (구글 시트 URL 미등록)', 'info');
+                }
+
+                // 구글 시트 데이터 fetch 완료 후 서브탭 및 통계 산출
+                switchAdminSubTab('records', false); // 중복 fetch 방지
             } else {
                 showToast('비밀번호가 올바르지 않습니다.', 'error');
             }
@@ -919,7 +938,7 @@ function doGet(e) {
             switchTab('student');
         }
 
-        function switchAdminSubTab(subTab) {
+        async function switchAdminSubTab(subTab, shouldFetch = true) {
             const pageRecords = document.getElementById('adminPage-records');
             const pageSettings = document.getElementById('adminPage-settings');
             const navRecords = document.getElementById('adminSubNav-records');
@@ -930,7 +949,11 @@ function doGet(e) {
                 pageSettings.classList.add('hidden');
                 navRecords.className = "flex-1 py-2.5 text-xs sm:text-sm font-bold rounded-xl bg-white text-indigo-700 shadow-sm transition";
                 navSettings.className = "flex-1 py-2.5 text-xs sm:text-sm font-bold rounded-xl text-slate-600 hover:text-slate-900 transition";
-                refreshAdminDataFromSheet();
+                if (shouldFetch) {
+                    await refreshAdminDataFromSheet();
+                } else {
+                    renderLogsTable();
+                }
             } else {
                 pageRecords.classList.add('hidden');
                 pageSettings.classList.remove('hidden');
