@@ -232,6 +232,21 @@
 
             <!-- 서브페이지 1: [📊 통계 및 데이터 기록] -->
             <div id="adminPage-records" class="space-y-6">
+                <!-- 페이지 상단 액션 바 및 실시간 새로고침 버튼 -->
+                <div class="bg-indigo-50/70 border border-indigo-100 rounded-2xl p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                    <div class="flex items-center gap-2.5">
+                        <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                        <div>
+                            <h3 class="text-xs sm:text-sm font-bold text-slate-800">구글 스프레드시트 실시간 통계 모니터링</h3>
+                            <p class="text-[11px] text-slate-500">새로고침 시 전교생 구글 시트 원본 데이터를 실시간으로 가져와 요약 지표와 시트를 재산출합니다.</p>
+                        </div>
+                    </div>
+                    <button type="button" id="btnAdminGlobalRefresh" onclick="handleRealtimeDataRefresh()" class="w-full sm:w-auto px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shadow-sm flex items-center justify-center gap-2 shrink-0">
+                        <span id="refreshIcon" class="inline-block transition-transform duration-500">🔄</span>
+                        <span id="refreshBtnText">실시간 데이터 새로고침</span>
+                    </button>
+                </div>
+
                 <!-- 요약 지표 카드 4종 -->
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
                     <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
@@ -289,8 +304,8 @@
                             <p class="text-xs text-slate-500 mt-0.5">구글 스프레드시트의 원본 데이터에 기반하여 실시간으로 통계 및 테이블이 산출됩니다.</p>
                         </div>
                         <div class="flex flex-wrap items-center gap-2 w-full lg:w-auto">
-                            <button type="button" onclick="refreshAdminDataFromSheet()" class="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl text-xs font-bold transition border border-indigo-200">
-                                🔄 구글 시트 새로고침
+                            <button type="button" onclick="handleRealtimeDataRefresh()" class="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl text-xs font-bold transition border border-indigo-200 flex items-center gap-1.5">
+                                <span>🔄</span> 새로고침
                             </button>
                             <select id="filterGrade" onchange="renderLogsTable()" class="bg-slate-50 border border-slate-300 rounded-xl px-2.5 py-1.5 text-xs focus:outline-none">
                                 <option value="">전체 학년</option>
@@ -1271,6 +1286,45 @@ function doGet(e) {
                 showToast('구글 시트 데이터를 가져오지 못해 로컬 데이터로 대체합니다.', 'error');
             }
             renderLogsTable();
+        }
+
+        // 관리자: 통계 및 데이터 기록 실시간 새로고침 핸들러
+        async function handleRealtimeDataRefresh() {
+            const btn = document.getElementById('btnAdminGlobalRefresh');
+            const icon = document.getElementById('refreshIcon');
+            const text = document.getElementById('refreshBtnText');
+            const sheetUrl = localStorage.getItem(GOOGLE_SHEET_URL_KEY);
+
+            if (icon) icon.classList.add('animate-spin');
+            if (btn) btn.disabled = true;
+            if (text) text.textContent = '구글 시트 동기화 중...';
+
+            if (!sheetUrl) {
+                showToast('등록된 구글 시트 연동 URL이 없습니다. [관리 및 설정]에서 먼저 등록해주세요.', 'error');
+                if (icon) icon.classList.remove('animate-spin');
+                if (btn) btn.disabled = false;
+                if (text) text.textContent = '실시간 데이터 새로고침';
+                renderLogsTable();
+                return;
+            }
+
+            try {
+                showToast('구글 시트 최신 데이터를 실시간으로 가져오는 중입니다...', 'info');
+                const data = await fetchGoogleSheetLogs();
+                if (data) {
+                    showToast(`구글 시트 데이터 ${data.length}건을 성공적으로 불러와 통계를 최신으로 갱신했습니다!`, 'success');
+                } else {
+                    showToast('구글 시트 응답을 확인하지 못해 현재 보유 데이터로 통계를 표시합니다.', 'error');
+                }
+            } catch (err) {
+                console.error('실시간 새로고침 오류:', err);
+                showToast('구글 시트 통신 중 오류가 발생했습니다.', 'error');
+            } finally {
+                if (icon) icon.classList.remove('animate-spin');
+                if (btn) btn.disabled = false;
+                if (text) text.textContent = '실시간 데이터 새로고침';
+                renderLogsTable();
+            }
         }
 
         // 관리자: 테이블 렌더링
